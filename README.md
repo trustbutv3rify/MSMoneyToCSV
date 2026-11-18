@@ -10,9 +10,10 @@ Converts a Microsoft Money `.mny` file to CSV files suitable for import into too
 
 The conversion process involves three main steps:
 
-1. **`mny2qif_modified.py`**: Converts the `.mny` file to QIF files for each account.
-2. **`QIFtoCSV_modified.py`**: Converts the QIF files to CSV files.
-3. **`extract_raw_tables.py`**: (Optional) Extracts all raw tables from the `.mny` file for debugging and troubleshooting.
+1. **`MNYtoCSV.py`**: Main program entrypoint - launches a GUI.
+2. **`mny2qif_modified.py`**: Converts the `.mny` file to QIF files for each account.
+3. **`QIFtoCSV_modified.py`**: Converts the QIF files to CSV files.
+4. **`extract_raw_tables.py`**: (Optional) Extracts all raw tables from the `.mny` file for debugging and troubleshooting.
 
 ## Files
 
