@@ -1,7 +1,7 @@
 # MS Money to CSV Conversion Suite
 
 Converts a Microsoft Money `.mny` file to CSV files suitable for import into tools like PowerBI. 
-**Thanks to [@ThisNoName](https://github.com/ThisNoName/running-out-of-money) for the python-native foundational database work** 
+**Thanks to [@ThisNoName] for [running-out-of-money](https://github.com/ThisNoName/running-out-of-money) for the python-native foundational database work** 
 
 *Note:  This code was supported and debugged with the help of AI.*
 
