@@ -70,14 +70,11 @@ python mny2qif_modified.py <MNY_FILE_PATH> [-o <OUTPUT_DIR>]
 - `<MNY_FILE_PATH>`: Path to the input `.mny` file.
 - `-o <OUTPUT_DIR>`: Output directory for the QIF files (default: current directory).
 
-### `QIFtoCSV_modified.py`
+### `QIFtoCSV_modified.py` (launches it's only Standalone GUI)
 
 ```bash
-python QIFtoCSV_modified.py <QIF_DIR> <CSV_DIR>
+python QIFtoCSV_modified.py
 ```
-
-- `<QIF_DIR>`: Directory containing QIF files.
-- `<CSV_DIR>`: Directory to save the converted CSV files.
 
 ### `extract_raw_tables.py`
 
