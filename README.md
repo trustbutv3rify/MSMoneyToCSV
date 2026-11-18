@@ -1,6 +1,3 @@
-Certainly! Below is the complete README.md file in a formatted Markdown block that you can copy and paste into a `.md` file:
-
----
 # MS Money to CSV Conversion Suite
 
 Converts a Microsoft Money `.mny` file to CSV files suitable for import into tools like PowerBI. 
