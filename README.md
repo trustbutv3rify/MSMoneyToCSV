@@ -5,6 +5,8 @@ Converts a Microsoft Money `.mny` file to CSV files suitable for import into too
 
 *Note:  This code was supported and debugged with the help of AI.*
 
+![Main GUI](MNYtoCSV_Screenshot.png)
+
 The conversion process involves three main steps:
 
 1. **`MNYtoCSV.py`**: Main program entrypoint - launches a GUI.
