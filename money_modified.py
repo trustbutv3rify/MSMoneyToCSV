@@ -1,26 +1,79 @@
+###############################################################################
+###                                                                         ###
+### Source:       Fork of the money.py file from the running-out-of-money   ### 
+###               repo by ThisNoName.                                       ###
+###               Modified to include and parse more account types          ###
+###                                                                         ###
+### Typical Use:  Called from the mny2qif_modified.py to enumerate the      ###
+###               Accounts in the MNY ledger.                               ###
+###                                                                         ###
+###                                          trustbutv3rify - 2026/11/18    ###
+###############################################################################
 """
-Microsoft Money (.mny) -> QIF conversion for banking and credit card accounts.
+Microsoft Money (.mny) -> QIF conversion for Accounts in the ledger.
 
 Money's system catalogue is encrypted, so the tables below are located by
 their column signature rather than by name (see jet4.JetDatabase.find_table).
+
 """
 
 import datetime
 
 # ACCT.at values.  Only the two types below can be represented in QIF by this
 # tool; everything else (investment, loan, asset, ...) is reported and skipped.
+
 AT_BANK = 0
 AT_CREDIT_CARD = 1
+AT_CASH = 2
+AT_ASSET = 3
+AT_LIABILITY = 4
+AT_INVESTMENT = 5
+AT_LOAN = 6
+AT_LOC = 7
+AT_MORTGAGE = 8
 
 QIF_TYPE = {
     AT_BANK: "!Type:Bank",
     AT_CREDIT_CARD: "!Type:CCard",
+    AT_CASH: "!Type:Cash",
+    AT_ASSET: "!Type:Oth A",
+    AT_LIABILITY: "!Type:Oth L",
+    AT_INVESTMENT: "!Type:Invst",
+    AT_LOAN: "!Type:Oth L",
+    AT_LOC: "!Type:Oth L",
+    AT_MORTGAGE: "!Type:Oth L",
+}
+
+INV_ACTIONS = {
+    1: "Buy",
+    2: "Sell",
+    3: "Div",
+    4: "Int",
+    8: "RtrnCap",
+    9: "ReinvDiv",
+    10: "ReinvInt",
+    12: "ShrsIn",
+    13: "ShrsOut",
+    24: "CGShort",
+    26: "CGLong",
+    27: "ReinvSh",
+    29: "ReinvLg",
+    32: "ShrsIn",
+    33: "ShrsOut",
 }
 
 AT_NAMES = {
-    0: "bank", 1: "credit card", 2: "cash", 3: "asset", 4: "liability",
-    5: "investment", 6: "loan", 7: "line of credit", 8: "mortgage",
-    9: "employee stock option", 10: "other",
+    0: "bank",
+    1: "credit card",
+    2: "cash",
+    3: "asset",
+    4: "liability",
+    5: "investment",
+    6: "loan",
+    7: "line of credit",
+    8: "mortgage",
+    9: "employee stock option",
+    10: "other",
 }
 
 # TRN.grftt bit marking a scheduled/recurring bill template rather than a real
@@ -43,16 +96,28 @@ class ConversionError(Exception):
 
 def _fmt_date(d):
     """Money writes QIF dates as M/D'YYYY (no zero padding)."""
-    return "%d/%d'%04d" % (d.month, d.day, d.year)
+    #return "%d/%d'%04d" % (d.month, d.day, d.year)
+    """Custom:  Money QIF dates as YYYY-MM-DD (with zero padding)."""
+    return "%04d-%02d-%02d" % (d.year, d.month, d.day)
 
 
 def _fmt_amount(a):
     return "{:,.2f}".format(a or 0.0)
 
+def _fmt_precise(a):
+    """Format share price / quantity cleanly without trailing zeroes."""
+    s = "{:.6f}".format(a or 0.0).rstrip("0").rstrip(".")
+    return s if s else "0"
 
 def _sanitize(name):
     out = "".join(c if (c.isalnum() or c in " -_") else "_" for c in name)
     return "_".join(out.split()) or "account"
+
+def _qif_text(s):
+    """Match MS Money's ANSI QIF exporter by stripping non-ASCII symbols like ®."""
+    if not s:
+        return s
+    return s.replace("\u00ae", " ").replace("\u2122", " ").encode("ascii", "ignore").decode("ascii")
 
 
 class Account:
@@ -104,6 +169,8 @@ class Transaction:
         self.amount = row.get("amt") or 0.0
         self.hcat = row.get("hcat")
         self.hpay = row.get("lHpay")
+        self.hsec = row.get("hsec")
+        self.act = row.get("act")
         self.cleared = row.get("cs") or 0
         self.grftt = row.get("grftt") or 0
         self.memo = row.get("mMemo")
@@ -134,6 +201,8 @@ class MoneyFile:
         self.categories = {}
         self.payees = {}
         self.warnings = []
+        self.securities = {} 
+        self.inv_txns = {}
         self._load()
 
     # -- loading ---------------------------------------------------------
@@ -215,6 +284,15 @@ class MoneyFile:
             # A row with no account cannot appear in any register.
             if t.hacct is None or t.scheduled or t.htrn in scheduled:
                 continue
+            ### 1. ps == 1 (not ps == 2 or ps == 4!) - skips voided/skipped recurring bill instances (ps=1, ps=3, ps=4) 
+            ### 2. grfstem == 2051 (0x0803 — template/skipped bill instance flag; normal rows have grfstem == 0!)
+            ### 3. hbillHead is not None (57 — attached to a recurring bill series as an unposted/skipped instance)
+            #if (t.hacct is None or t.scheduled or t.htrn in scheduled
+            #        or r.get("ps") == 1 or (r.get("grfstem") or 0) != 0):
+            #    continue
+            #if (t.hacct is None or t.scheduled or t.htrn in scheduled
+            #        or r.get("hbillHead") is not None):
+            #    continue
             self.transactions[t.htrn] = t
 
         if split_t:
@@ -228,8 +306,24 @@ class MoneyFile:
             acct.transactions.sort(key=lambda t: (t.date or datetime.datetime.min,
                                                   t.htrn))
 
+        sec_t = self._table("security (SEC)", ["hsec", "szFull"], optional=True)
+        if sec_t:
+            self.securities = {
+                r["hsec"]: {"name": r["szFull"], "symbol": r.get("szSymbol")}
+                for r in self._read_all(sec_t, "securities")
+                if r["hsec"] is not None
+            }
+
+        inv_t = self._table("investment txn (TRN_INV)", ["htrn", "dPrice", "qty"],
+                            optional=True)
+        if inv_t:
+            self.inv_txns = {
+                r["htrn"]: r
+                for r in self._read_all(inv_t, "investment transactions")
+                if r["htrn"] is not None
+            }
+
     def _attach_splits(self, split_t):
-        """Money stores split lines as child TRN rows linked via TRN_SPLIT."""
         for r in split_t.rows():
             parent = self.transactions.get(r.get("htrnParent"))
             child = self.transactions.pop(r.get("htrn"), None)
@@ -261,7 +355,8 @@ class MoneyFile:
                 break
             parts.append(row["szFull"] or "")
             cur = row.get("hcatParent")
-        if len(parts) > 1:
+        #if len(parts) > 1:
+        if parts:
             parts.pop()  # drop the top-level INCOME / EXPENSE root
         path = ":".join(reversed([p for p in parts if p]))
         self.categories[hcat] = path or None
@@ -282,22 +377,80 @@ class MoneyFile:
 
     # -- QIF output ------------------------------------------------------
 
+    def _investment_lines(self, t):
+        """Format a single investment transaction (!Type:Invst) into QIF lines."""
+        lines = ["D" + _fmt_date(t.date) if t.date else "D"]
+        flag = CLEARED_FLAG.get(t.cleared)
+        if flag:
+            lines.append("C" + flag)
+        if t.memo:
+            lines.append("M" + t.memo)
+        lines.append("T" + _fmt_amount(abs(t.amount)))
+
+        inv_row = self.inv_txns.get(t.htrn)
+        sec = self.securities.get(t.hsec, {}) if t.hsec not in (None, -1) else {}
+
+        if inv_row or sec or (t.act not in (None, -1)):
+            action = INV_ACTIONS.get(t.act, "MiscINCOME" if t.amount >= 0 else "MiscEXPENSE")
+            lines.append("N" + action)
+            if sec.get("name"):
+                lines.append("Y" + _qif_text(sec["name"])) #sanitize QIF string
+            if inv_row:
+                price = inv_row.get("dPrice")
+                shares = inv_row.get("qty")
+                commission = inv_row.get("amtCmn")
+                if price:
+                    lines.append("I" + _fmt_precise(price))
+                elif action in ("ShrsIn", "ShrsOut"):
+                    lines.append("I")
+                if shares:
+                    lines.append("Q" + _fmt_precise(abs(shares)))
+                if commission:
+                    lines.append("O" + _fmt_amount(abs(commission)))
+        else:
+            lines.append("N" + ("MiscINCOME" if t.amount >= 0 else "MiscEXPENSE"))
+
+        cat = self.category_path(t.hcat)
+        if cat:
+            lines.append("L" + cat)
+
+        lines.append("^")
+        return lines
+
+        sec = self.securities.get(inv_row.get("hsec"), {})
+        action = INV_ACTIONS.get(inv_row.get("itt"), "MiscExp")
+        shares = inv_row.get("dShares") or 0.0
+        price = inv_row.get("dPrice") or 0.0
+        commission = inv_row.get("amtComm") or 0.0
+        dest = self.transfer_or_category(t)
+        if dest:
+            lines.append("L" + dest)
+        if t.memo:
+            lines.append("M" + t.memo)
+
+
     def account_qif(self, acct):
         """Render one account as a complete QIF document."""
         lines = [QIF_TYPE[acct.at]]
 
         # Money leads with a synthetic opening-balance record, modelled as a
         # reconciled transfer from the account to itself.
-        lines += ["D" + _fmt_date(acct.opening_date),
-                  "T" + _fmt_amount(acct.open_balance),
-                  "CX",
-                  "POpening Balance",
-                  "L[%s]" % acct.name,
-                  "^"]
+        #if acct.open_balance != 0.0:
+        if acct.at != AT_INVESTMENT :
+            lines += ["D" + _fmt_date(acct.opening_date),
+                    "T" + _fmt_amount(acct.open_balance),
+                    "CX",
+                    "POpening Balance",
+                    "L[%s]" % acct.name,
+                    "^"]
 
         for t in acct.transactions:
+            if acct.at == AT_INVESTMENT:
+                    lines.extend(self._investment_lines(t))
+                    continue
             lines.append("D" + _fmt_date(t.date) if t.date else "D")
-            lines.append("T" + _fmt_amount(t.amount))
+            if t.amount != 0.0:
+                lines.append("T" + _fmt_amount(t.amount))
             flag = CLEARED_FLAG.get(t.cleared)
             if flag:
                 lines.append("C" + flag)
@@ -308,14 +461,18 @@ class MoneyFile:
                 lines.append("P" + payee)
             if t.memo:
                 lines.append("M" + t.memo)
-            cat = self.transfer_or_category(t)
-            if cat:
-                lines.append("L" + cat)
-            for s in t.splits:
-                lines.append("S" + (s.category or ""))
-                if s.memo:
-                    lines.append("E" + s.memo)
-                lines.append("$" + _fmt_amount(s.amount))
+
+            dest = self.transfer_or_category(t)
+            if dest:
+                lines.append("L" + dest)
+
+            if t.splits:
+                for s in t.splits:
+                    lines.append("S" + (s.category or ""))
+                    if s.memo:
+                        lines.append("E" + s.memo)
+                    lines.append("$" + _fmt_amount(s.amount))
+
             lines.append("^")
 
         return CRLF.join(lines) + CRLF
@@ -330,8 +487,9 @@ class MoneyFile:
 
     @staticmethod
     def filename_for(acct, stem):
-        return "%s_%s.qif" % (stem, _sanitize(acct.name))
-
+        # return "%s_%s.qif" % (stem, _sanitize(acct.name))
+        return "%s.qif" % (_sanitize(acct.name))
+    
     @staticmethod
     def manifest_name(stem):
         return stem + MANIFEST_SUFFIX
