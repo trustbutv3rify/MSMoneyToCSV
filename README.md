@@ -48,9 +48,9 @@ The conversion process involves three main steps:
 python mny2qif_modified.py <MNY_FILE_PATH> -o <OUTPUT_DIR>
 ```
 
-#### Step 2: Convert QIF to CSV
+#### Step 2: Convert QIF to CSV (launches it's only Standalone GUI)
 ```bash
-python QIFtoCSV_modified.py <QIF_DIR> <CSV_DIR>
+python QIFtoCSV_modified.py
 ```
 
 #### Step 3: Extract Raw Tables (Optional)
